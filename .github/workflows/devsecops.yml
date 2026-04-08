@@ -1,0 +1,70 @@
+name: DevSecOps Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  sast-scan:
+    name: CodeQL SAST
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  dependency-analysis:
+    name: Dependency Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Run Trivy vulnerability scanner in fs mode
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '0'
+
+  build-scan-container:
+    name: Build & Scan Container
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Build an image from Dockerfile
+        run: docker build -t dummy-app:${{ github.sha }} .
+      - name: Run Trivy vulnerability scanner on image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'dummy-app:${{ github.sha }}'
+          format: 'table'
+          exit-code: '0'
+
+  owasp-zap-dast:
+    name: OWASP ZAP DAST
+    runs-on: ubuntu-latest
+    needs: build-scan-container
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Build and Run Container
+        run: |
+          docker build -t dummy-app:latest .
+          docker run -d -p 8080:8080 --name test-app dummy-app:latest
+          sleep 10
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.11.0
+        with:
+          target: 'http://localhost:8080'
+          fail_action: false
